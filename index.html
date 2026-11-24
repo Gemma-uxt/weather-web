@@ -9,8 +9,22 @@
   body { margin: 0; font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
          background: #f4f6f9; color: #1f2933; }
   .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
-  h1 { font-size: 24px; margin: 0 0 4px; }
-  .sub { color: #6b7785; font-size: 14px; margin-bottom: 20px; }
+  h1 { font-size: 24px; margin: 0 0 16px; }
+  .sub { color: #6b7785; font-size: 14px; margin: 0 0 20px; }
+
+  /* 도시 선택 네모 */
+  .cities { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 8px; }
+  .city { background: #fff; border: 2px solid #e3e8ee; border-radius: 14px; padding: 16px 18px;
+          cursor: pointer; text-align: left; font: inherit; color: inherit;
+          display: flex; align-items: center; gap: 14px; transition: border-color .15s, box-shadow .15s; }
+  .city:hover { border-color: #a5c8f0; }
+  .city.on { border-color: #1c7ed6; box-shadow: 0 0 0 3px rgba(28,126,214,.12); }
+  .city .cicon { font-size: 40px; line-height: 1; }
+  .city .cname { font-size: 18px; font-weight: 700; }
+  .city .cnow { font-size: 14px; color: #6b7785; margin-top: 4px; }
+  .city .cnow b.max { color: #d9480f; }
+  .city .cnow b.min { color: #1c7ed6; }
+
   .cards { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }
   .card { background: #fff; border-radius: 12px; padding: 12px 6px; text-align: center;
           box-shadow: 0 1px 3px rgba(0,0,0,.06); }
@@ -28,23 +42,27 @@
   .err { background: #fff4e6; color: #a6501b; padding: 16px; border-radius: 12px; }
   @media (max-width: 640px) {
     .cards { grid-template-columns: repeat(4, 1fr); }
+    .city { padding: 12px; gap: 10px; }
+    .city .cicon { font-size: 32px; }
   }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1 id="title">일주일 날씨</h1>
+  <h1>일주일 날씨</h1>
+
+  <div class="cities" id="cities"></div>
   <div class="sub" id="updated">불러오는 중…</div>
 
   <div class="cards" id="cards"></div>
 
   <div class="box">
-    <h2>기온 (°C)</h2>
+    <h2 id="tempTitle">기온 (°C)</h2>
     <div class="chart"><canvas id="tempChart"></canvas></div>
   </div>
 
   <div class="box">
-    <h2>강수량 (mm) · 강수확률 (%)</h2>
+    <h2 id="rainTitle">강수량 (mm) · 강수확률 (%)</h2>
     <div class="chart"><canvas id="rainChart"></canvas></div>
   </div>
 </div>
@@ -70,63 +88,90 @@ function label(dateStr) {
   return `${d.getMonth() + 1}/${d.getDate()}(${WEEK[d.getDay()]})`;
 }
 
+let tempChart = null, rainChart = null, cities = [];
+
+// 선택한 도시의 날씨를 아래에 그리기
+function show(idx) {
+  const c = cities[idx];
+  document.querySelectorAll(".city").forEach((el, i) => el.classList.toggle("on", i === idx));
+  document.getElementById("updated").textContent =
+    `${c.city} · 마지막 수집: ${c.updated} (매일 아침 자동 갱신)`;
+  document.getElementById("tempTitle").textContent = `${c.city} 기온 (°C)`;
+  document.getElementById("rainTitle").textContent = `${c.city} 강수량 (mm) · 강수확률 (%)`;
+
+  const labels = c.days.map(d => label(d.date));
+
+  document.getElementById("cards").innerHTML = c.days.map(d => {
+    const [icon, desc] = weatherInfo(d.code);
+    return `<div class="card">
+      <div class="day">${label(d.date)}</div>
+      <div class="icon">${icon}</div>
+      <div class="desc">${desc}</div>
+      <div class="temp"><span class="max">${Math.round(d.tmax)}°</span> / <span class="min">${Math.round(d.tmin)}°</span></div>
+      <div class="rain">☔ ${d.rain_prob ?? 0}%</div>
+    </div>`;
+  }).join("");
+
+  if (tempChart) tempChart.destroy();
+  if (rainChart) rainChart.destroy();
+
+  tempChart = new Chart(document.getElementById("tempChart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "최고기온", data: c.days.map(d => d.tmax), borderColor: "#e8590c",
+          backgroundColor: "#e8590c", tension: 0.3, pointRadius: 4 },
+        { label: "최저기온", data: c.days.map(d => d.tmin), borderColor: "#1c7ed6",
+          backgroundColor: "#1c7ed6", tension: 0.3, pointRadius: 4 }
+      ]
+    },
+    options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+               plugins: { legend: { position: "bottom" } } }
+  });
+
+  rainChart = new Chart(document.getElementById("rainChart"), {
+    data: {
+      labels,
+      datasets: [
+        { type: "bar", label: "강수량(mm)", data: c.days.map(d => d.rain),
+          backgroundColor: "#74c0fc", yAxisID: "y" },
+        { type: "line", label: "강수확률(%)", data: c.days.map(d => d.rain_prob),
+          borderColor: "#495057", backgroundColor: "#495057", tension: 0.3, yAxisID: "y1" }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+      plugins: { legend: { position: "bottom" } },
+      scales: {
+        y:  { beginAtZero: true, title: { display: true, text: "mm" } },
+        y1: { beginAtZero: true, max: 100, position: "right",
+              grid: { drawOnChartArea: false }, title: { display: true, text: "%" } }
+      }
+    }
+  });
+}
+
 fetch("data/weather.json?t=" + Date.now())
   .then(r => { if (!r.ok) throw new Error(); return r.json(); })
   .then(data => {
-    document.getElementById("title").textContent = `${data.city} 일주일 날씨`;
-    document.getElementById("updated").textContent = `마지막 수집: ${data.updated} (매일 아침 자동 갱신)`;
+    // 예전 형식(도시 1개) 데이터도 읽을 수 있게
+    cities = data.cities || [{ city: data.city, updated: data.updated, days: data.days }];
 
-    const labels = data.days.map(d => label(d.date));
-
-    // 요일별 카드
-    document.getElementById("cards").innerHTML = data.days.map(d => {
-      const [icon, desc] = weatherInfo(d.code);
-      return `<div class="card">
-        <div class="day">${label(d.date)}</div>
-        <div class="icon">${icon}</div>
-        <div class="desc">${desc}</div>
-        <div class="temp"><span class="max">${Math.round(d.tmax)}°</span> / <span class="min">${Math.round(d.tmin)}°</span></div>
-        <div class="rain">☔ ${d.rain_prob ?? 0}%</div>
-      </div>`;
+    // 제목 아래 도시 네모 (오늘 날씨 요약 포함)
+    document.getElementById("cities").innerHTML = cities.map((c, i) => {
+      const t = c.days[0];
+      const [icon, desc] = weatherInfo(t.code);
+      return `<button class="city" onclick="show(${i})">
+        <div class="cicon">${icon}</div>
+        <div>
+          <div class="cname">${c.city}</div>
+          <div class="cnow">오늘 ${desc} · <b class="max">${Math.round(t.tmax)}°</b> / <b class="min">${Math.round(t.tmin)}°</b></div>
+        </div>
+      </button>`;
     }).join("");
 
-    // 기온 그래프
-    new Chart(document.getElementById("tempChart"), {
-      type: "line",
-      data: {
-        labels,
-        datasets: [
-          { label: "최고기온", data: data.days.map(d => d.tmax), borderColor: "#e8590c",
-            backgroundColor: "#e8590c", tension: 0.3, pointRadius: 4 },
-          { label: "최저기온", data: data.days.map(d => d.tmin), borderColor: "#1c7ed6",
-            backgroundColor: "#1c7ed6", tension: 0.3, pointRadius: 4 }
-        ]
-      },
-      options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-                 plugins: { legend: { position: "bottom" } } }
-    });
-
-    // 강수 그래프 (막대: 강수량, 선: 강수확률)
-    new Chart(document.getElementById("rainChart"), {
-      data: {
-        labels,
-        datasets: [
-          { type: "bar", label: "강수량(mm)", data: data.days.map(d => d.rain),
-            backgroundColor: "#74c0fc", yAxisID: "y" },
-          { type: "line", label: "강수확률(%)", data: data.days.map(d => d.rain_prob),
-            borderColor: "#495057", backgroundColor: "#495057", tension: 0.3, yAxisID: "y1" }
-        ]
-      },
-      options: {
-        maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
-        plugins: { legend: { position: "bottom" } },
-        scales: {
-          y:  { beginAtZero: true, title: { display: true, text: "mm" } },
-          y1: { beginAtZero: true, max: 100, position: "right",
-                grid: { drawOnChartArea: false }, title: { display: true, text: "%" } }
-        }
-      }
-    });
+    show(0);
   })
   .catch(() => {
     document.getElementById("updated").innerHTML =
