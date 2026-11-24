@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>일주일 날씨</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+  body { margin: 0; font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+         background: #f4f6f9; color: #1f2933; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: #6b7785; font-size: 14px; margin-bottom: 20px; }
+  .cards { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 20px; }
+  .card { background: #fff; border-radius: 12px; padding: 12px 6px; text-align: center;
+          box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .card .day { font-size: 13px; color: #6b7785; }
+  .card .icon { font-size: 28px; margin: 6px 0; }
+  .card .desc { font-size: 12px; color: #6b7785; min-height: 16px; }
+  .card .temp { font-size: 14px; margin-top: 6px; }
+  .card .max { color: #d9480f; font-weight: 600; }
+  .card .min { color: #1c7ed6; font-weight: 600; }
+  .card .rain { font-size: 12px; color: #6b7785; margin-top: 4px; }
+  .box { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px;
+         box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .box h2 { font-size: 16px; margin: 0 0 12px; }
+  .chart { position: relative; height: 280px; }
+  .err { background: #fff4e6; color: #a6501b; padding: 16px; border-radius: 12px; }
+  @media (max-width: 640px) {
+    .cards { grid-template-columns: repeat(4, 1fr); }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">일주일 날씨</h1>
+  <div class="sub" id="updated">불러오는 중…</div>
+
+  <div class="cards" id="cards"></div>
+
+  <div class="box">
+    <h2>기온 (°C)</h2>
+    <div class="chart"><canvas id="tempChart"></canvas></div>
+  </div>
+
+  <div class="box">
+    <h2>강수량 (mm) · 강수확률 (%)</h2>
+    <div class="chart"><canvas id="rainChart"></canvas></div>
+  </div>
+</div>
+
+<script>
+// 날씨 코드 → 아이콘·설명
+function weatherInfo(code) {
+  if (code === 0) return ["☀️", "맑음"];
+  if (code <= 2) return ["🌤️", "구름 조금"];
+  if (code === 3) return ["☁️", "흐림"];
+  if (code <= 48) return ["🌫️", "안개"];
+  if (code <= 57) return ["🌦️", "이슬비"];
+  if (code <= 67) return ["🌧️", "비"];
+  if (code <= 77) return ["❄️", "눈"];
+  if (code <= 82) return ["🌧️", "소나기"];
+  if (code <= 86) return ["🌨️", "소낙눈"];
+  return ["⛈️", "뇌우"];
+}
+
+const WEEK = ["일", "월", "화", "수", "목", "금", "토"];
+function label(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return `${d.getMonth() + 1}/${d.getDate()}(${WEEK[d.getDay()]})`;
+}
+
+fetch("data/weather.json?t=" + Date.now())
+  .then(r => { if (!r.ok) throw new Error(); return r.json(); })
+  .then(data => {
+    document.getElementById("title").textContent = `${data.city} 일주일 날씨`;
+    document.getElementById("updated").textContent = `마지막 수집: ${data.updated} (매일 아침 자동 갱신)`;
+
+    const labels = data.days.map(d => label(d.date));
+
+    // 요일별 카드
+    document.getElementById("cards").innerHTML = data.days.map(d => {
+      const [icon, desc] = weatherInfo(d.code);
+      return `<div class="card">
+        <div class="day">${label(d.date)}</div>
+        <div class="icon">${icon}</div>
+        <div class="desc">${desc}</div>
+        <div class="temp"><span class="max">${Math.round(d.tmax)}°</span> / <span class="min">${Math.round(d.tmin)}°</span></div>
+        <div class="rain">☔ ${d.rain_prob ?? 0}%</div>
+      </div>`;
+    }).join("");
+
+    // 기온 그래프
+    new Chart(document.getElementById("tempChart"), {
+      type: "line",
+      data: {
+        labels,
+        datasets: [
+          { label: "최고기온", data: data.days.map(d => d.tmax), borderColor: "#e8590c",
+            backgroundColor: "#e8590c", tension: 0.3, pointRadius: 4 },
+          { label: "최저기온", data: data.days.map(d => d.tmin), borderColor: "#1c7ed6",
+            backgroundColor: "#1c7ed6", tension: 0.3, pointRadius: 4 }
+        ]
+      },
+      options: { maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+                 plugins: { legend: { position: "bottom" } } }
+    });
+
+    // 강수 그래프 (막대: 강수량, 선: 강수확률)
+    new Chart(document.getElementById("rainChart"), {
+      data: {
+        labels,
+        datasets: [
+          { type: "bar", label: "강수량(mm)", data: data.days.map(d => d.rain),
+            backgroundColor: "#74c0fc", yAxisID: "y" },
+          { type: "line", label: "강수확률(%)", data: data.days.map(d => d.rain_prob),
+            borderColor: "#495057", backgroundColor: "#495057", tension: 0.3, yAxisID: "y1" }
+        ]
+      },
+      options: {
+        maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        plugins: { legend: { position: "bottom" } },
+        scales: {
+          y:  { beginAtZero: true, title: { display: true, text: "mm" } },
+          y1: { beginAtZero: true, max: 100, position: "right",
+                grid: { drawOnChartArea: false }, title: { display: true, text: "%" } }
+        }
+      }
+    });
+  })
+  .catch(() => {
+    document.getElementById("updated").innerHTML =
+      '<div class="err">아직 날씨 데이터가 없어요. 깃허브 Actions에서 "날씨 자동 수집"을 한 번 실행해 주세요.</div>';
+  });
+</script>
+</body>
+</html>
