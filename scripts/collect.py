@@ -20,8 +20,28 @@ URL = (
     "&timezone=Asia%2FSeoul&forecast_days=7"
 )
 
-with urllib.request.urlopen(URL, timeout=30) as res:
-    raw = json.load(res)
+import sys
+import time
+
+# 접속이 잠깐 안 될 때를 대비해 최대 5번까지 다시 시도
+raw = None
+for attempt in range(1, 6):
+    try:
+        req = urllib.request.Request(URL, headers={"User-Agent": "weather-web (GitHub Actions)"})
+        with urllib.request.urlopen(req, timeout=60) as res:
+            raw = json.load(res)
+        break
+    except Exception as e:
+        print(f"{attempt}번째 시도 실패: {e}")
+        if attempt < 5:
+            time.sleep(attempt * 15)  # 15초, 30초, 45초… 쉬었다가 다시
+
+if raw is None:
+    if os.path.exists("data/weather.json"):
+        # 이전에 모아 둔 데이터가 있으면 그대로 두고 오늘은 건너뜀
+        print("오늘은 접속에 실패해 이전 데이터를 그대로 유지합니다.")
+        sys.exit(0)
+    sys.exit("날씨 사이트 접속에 계속 실패했습니다. 잠시 후 다시 실행해 주세요.")
 
 d = raw["daily"]
 days = []
